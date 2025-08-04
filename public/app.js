@@ -8,26 +8,35 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Tab switching
 function showTab(tabName) {
-    // Remove active class from all tabs and forms
-    document.querySelectorAll('.tab-button').forEach(tab => tab.classList.remove('active'));
-    document.querySelectorAll('.form-container').forEach(form => {
-        form.classList.remove('active');
-        form.classList.add('hidden');
+    // Reset all tab buttons to inactive state
+    document.querySelectorAll('button[onclick*="showTab"]').forEach(tab => {
+        tab.className = "flex-1 p-4 bg-gray-100 text-gray-700 border-none cursor-pointer transition-all duration-300 font-medium hover:bg-indigo-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500";
+        if (tab.textContent === 'Login') {
+            tab.className += " rounded-l-md";
+        } else {
+            tab.className += " rounded-r-md";
+        }
     });
     
-    // Find the tab button that matches the tabName and make it active
-    const tabs = document.querySelectorAll('.tab-button');
+    // Hide all forms
+    document.getElementById('loginForm').classList.add('hidden');
+    document.getElementById('loginForm').classList.remove('block');
+    document.getElementById('registerForm').classList.add('hidden');
+    document.getElementById('registerForm').classList.remove('block');
+    
+    // Set active tab button
+    const tabs = document.querySelectorAll('button[onclick*="showTab"]');
     tabs.forEach(tab => {
         if ((tabName === 'login' && tab.textContent === 'Login') || 
             (tabName === 'register' && tab.textContent === 'Register')) {
-            tab.classList.add('active');
+            tab.className = tab.className.replace('bg-gray-100 text-gray-700', 'bg-indigo-600 text-white');
         }
     });
     
     // Show the corresponding form
     const targetForm = document.getElementById(tabName + 'Form');
-    targetForm.classList.add('active');
     targetForm.classList.remove('hidden');
+    targetForm.classList.add('block');
 }
 
 // Registration handler
@@ -135,8 +144,8 @@ async function checkAuthStatus() {
 // Show user information
 function showUserInfo(user) {
     document.getElementById('authSection').style.display = 'none';
-    document.getElementById('userInfo').classList.add('show');
     document.getElementById('userInfo').classList.remove('hidden');
+    document.getElementById('userInfo').classList.add('block');
     
     document.getElementById('currentUsername').textContent = user.username;
     document.getElementById('currentDisplayName').textContent = user.displayName || user.username;
@@ -148,8 +157,8 @@ function logout() {
     localStorage.removeItem('authToken');
     
     document.getElementById('authSection').style.display = 'block';
-    document.getElementById('userInfo').classList.remove('show');
     document.getElementById('userInfo').classList.add('hidden');
+    document.getElementById('userInfo').classList.remove('block');
     
     showMessage('Logged out successfully', 'success');
 }
@@ -157,8 +166,10 @@ function logout() {
 // Show message
 function showMessage(text, type) {
     const messageDiv = document.getElementById('message');
-    const messageClass = type === 'success' ? 'success-message' : 'error-message';
-    messageDiv.innerHTML = `<div class="${messageClass}">${text}</div>`;
+    const messageClasses = type === 'success' 
+        ? 'bg-green-50 text-green-800 border border-green-200 p-3 rounded-md text-center mt-4'
+        : 'bg-red-50 text-red-800 border border-red-200 p-3 rounded-md text-center mt-4';
+    messageDiv.innerHTML = `<div class="${messageClasses}">${text}</div>`;
     
     // Clear message after 5 seconds
     setTimeout(() => {
