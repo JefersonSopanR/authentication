@@ -1,9 +1,16 @@
-// Check if user is already logged in when page loads
-document.addEventListener('DOMContentLoaded', function() {
-    const token = localStorage.getItem('authToken');
-    if (token) {
-        checkAuthStatus();
-    }
+document.addEventListener('DOMContentLoaded', () => {
+  // 🔑 Check if Google OAuth sent back a token in the hash
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  const token = hash.get('token');
+  if (token) {
+    localStorage.setItem('authToken', token);
+    window.location.hash = ''; // clean up the URL
+    showMessage('Google login successful!', 'success');
+    checkAuthStatus(); // verify & load user
+  } else {
+    // If no token in URL, still check if user already logged in
+    checkAuthStatus();
+  }
 });
 
 // Tab switching

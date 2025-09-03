@@ -9,16 +9,25 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "fastify": "^4.24.3",
-    "@fastify/static": "^6.12.0",
-    "@fastify/formbody": "^7.4.0",
-    "@fastify/cors": "^8.4.0",
-    "@fastify/jwt": "^7.2.4",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/formbody": "^8.0.2",
+    "@fastify/jwt": "^10.0.0",
+    "@fastify/oauth2": "^8.1.2",
+    "@fastify/static": "^8.2.0",
+    "bcrypt": "^5.1.1",
+    "dotenv": "^17.2.2",
+    "fastify": "^5.5.0",
     "sequelize": "^6.35.1",
     "sqlite3": "^5.1.6",
-    "bcrypt": "^5.1.1"
+    "undici": "^7.15.0"
   },
-  "keywords": ["authentication", "login", "registration", "fastify", "jwt"],
+  "keywords": [
+    "authentication",
+    "login",
+    "registration",
+    "fastify",
+    "jwt"
+  ],
   "author": "Student",
   "license": "MIT"
 }
