@@ -1,35 +1,47 @@
-import React, { createContext, useState, useEffect } from "react";
+import { createContext, useState, useEffect } from "react";
 
 //creates a data-sharing-system so any component can directly get acces to the data
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem("authToken"));
+    const [user, setUser] = useState(null);
+  const [token, setToken] = useState(localStorage.getItem("authToken") || null);
+  const [loading, setLoading] = useState(true); // ← Add loading state
 
-  // Check if token still valid
-  //this useEffect only triggers when: App starts, Token changes.
   useEffect(() => {
-	//define the function
     const checkAuth = async () => {
-      if (!token) return;
+      if (!token) {
+        console.log("🚨 No token found, clearing user");
+        setUser(null);
+        setLoading(false); // ← Done loading
+        return;
+      }
+      
       try {
         const res = await fetch("http://localhost:3001/api/me", {
           headers: { Authorization: `Bearer ${token}` }
         });
+        
         if (res.ok) {
           const data = await res.json();
+          console.log("✅ Token valid, setting user:", data.user);
           setUser(data.user);
         } else {
           localStorage.removeItem("authToken");
+          console.log("Entering else AuthProvider!!!");
           setToken(null);
           setUser(null);
         }
       } catch (err) {
         console.error("Auth check failed", err);
+        localStorage.removeItem("authToken");
+        setToken(null);
+        setUser(null);
+      } finally {
+        setLoading(false); // ← Always done loading
       }
     };
-	//calling the function
+    
     checkAuth();
   }, [token]);
 
@@ -47,7 +59,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout }}>
+    <AuthContext.Provider value={{ user, token, login, logout, loading }}> {/* ← Provide loading */}
       {children}
     </AuthContext.Provider>
   );

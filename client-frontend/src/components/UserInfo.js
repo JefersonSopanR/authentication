@@ -1,14 +1,23 @@
 import { useContext } from "react";
 import { AuthContext } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
 
 const UserInfo = () => {
   const { user, logout } = useContext(AuthContext);
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
 
   return (
-    <div className="p-4 bg-gray-100 rounded text-center">
-      <h2 className="text-xl font-bold">Welcome, {user?.displayName || user?.username}</h2>
-      <p><strong>ID:</strong> {user?.id}</p>
-      <button className="mt-4 w-full bg-red-600 text-white py-2 rounded" onClick={logout}>
+    <div className="text-center">
+      <h2 className="text-2xl font-semibold mb-4">Welcome!</h2>
+      <p><strong>Username:</strong> {user?.username}</p>
+      <p><strong>Display Name:</strong> {user?.displayName || user?.username}</p>
+      <p><strong>User ID:</strong> {user?.id}</p>
+      <button className="mt-6 w-full bg-red-600 text-white py-2 rounded" onClick={handleLogout}>
         Logout
       </button>
     </div>
