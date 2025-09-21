@@ -7,8 +7,18 @@ export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("authToken") || null);
   const [loading, setLoading] = useState(true); // ← Add loading state
+  const [count, setCount] = useState(0);
+
+  console.log("token is ::: -> '" + token + "'")
+  console.log("user is ::: -> '" + user + "'")
+  console.log("loading is ::: -> '" + loading + "'")
+  console.log("count is ::: -> '" + count + "'")
+
+
+
 
   useEffect(() => {
+    setCount(c => c + 1);
     const checkAuth = async () => {
       if (!token) {
         console.log("🚨 No token found, clearing user");
