@@ -1,0 +1,132 @@
+.app-container {
+    min-height: 100vh;
+    background: #000;
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    text-align: center;
+}
+
+.app-title {
+    font-size: 2.5rem;
+    margin: 1.5rem 0;
+    font-weight: bold;
+}
+
+/* Difficulty controls */
+.difficulty-controls {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    justify-content: center;
+}
+
+/* Buttons */
+.btn {
+    padding: 0.5rem 1.5rem;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: bold;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.btn-easy {
+    background: #22c55e;
+    color: white;
+}
+.btn-easy:hover {
+    background: #16a34a;
+}
+.btn-medium {
+    background: #eab308;
+    color: white;
+}
+.btn-medium:hover {
+    background: #ca8a04;
+}
+.btn-hard {
+    background: #dc2626;
+    color: white;
+}
+.btn-hard:hover {
+    background: #b91c1c;
+}
+.btn-ai {
+    background: #22c55e;
+    color: white;
+}
+.btn-ai:hover {
+    background: #16a34a;
+}
+.btn-human {
+    background: #2563eb;
+    color: white;
+}
+.btn-human:hover {
+    background: #1d4ed8;
+}
+
+/* Modal styles */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: #222;
+    padding: 2rem;
+    border-radius: 12px;
+    min-width: 300px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.4);
+}
+.modal-question {
+    margin-bottom: 1.5rem;
+    font-size: 1.2rem;
+}
+.modal-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+body { 
+    margin: 0; 
+    padding: 20px; 
+    font-family: Arial, sans-serif; 
+    background-color: #222;
+    color: white;
+    text-align: center;
+}
+
+#gameCanvas { 
+    border: 2px solid white; 
+    background-color: #000;
+    cursor: none;
+}
+
+.info {
+    margin: 10px 0;
+    font-size: 18px;
+}
+
+.score {
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.controls {
+    margin-top: 20px;
+    background-color: #333;
+    padding: 15px;
+    border-radius: 10px;
+    display: inline-block;
+}

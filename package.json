@@ -18,6 +18,7 @@
     "dotenv": "^17.2.2",
     "fastify": "^5.5.0",
     "sequelize": "^6.35.1",
+    "socket.io": "^4.8.1",
     "sqlite3": "^5.1.6",
     "undici": "^7.15.0"
   },

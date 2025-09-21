@@ -3,6 +3,7 @@ import { AuthProvider, AuthContext } from "./context/AuthContext";
 import LoginForm from "./components/LoginForm";
 import RegisterForm from "./components/RegisterForm";
 import UserInfo from "./components/UserInfo";
+import Game from "./components/Game"
 import useOAuthCallback from "./hooks/useOauthcallback";
 import { useContext } from "react";
 
@@ -17,14 +18,6 @@ function ProtectedRoute({ children }) {
   return user ? children : <Navigate to="/login" />; // ← Redirect to login, not register
 }
 //Use <Navigate> for automatic redirects (like now), use useNavigate for user-triggered navigation
-
-const Game = () => {
-  return (
-    <div>
-      <h1>Game</h1>
-    </div>
-  )
-}
 
 const Settings = () => {
   return (
