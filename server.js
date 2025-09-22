@@ -21,13 +21,6 @@ const __dirname = path.dirname(__filename);
 // Create Fastify server
 const app = fastify({ logger: true });
 
-const io = new Server(app.server, {
-    cors: {
-        origin: 'http://localhost:2323',
-        methods: ["GET", "POST"]
-    }
-});
-
 // Register plugins
 await app.register(cors, { origin: '*' });
 await app.register(formBody);
@@ -100,35 +93,94 @@ app.get('/', async (req, reply) => {
   return reply.sendFile('index.html');
 });
 
+const io = new Server(app.server, {
+    cors: {
+        origin: 'http://localhost:2323',
+        methods: ["GET", "POST"]
+    }
+});
+
 // Game rooms
+app.decorate('io', io);
+
+// Game rooms
+//gameRooms is an object so it store data as key-value pairs 
 var gameRooms = {};
 var nextRoomId = 1;
+let freeRoomIds = []; 
+
+//The shift() method returns and removes the first element in the array
+function createRoomId() {
+    if (freeRoomIds.length > 0) {
+        return `room${freeRoomIds.shift()}`; // reuse smallest available
+    }
+    return `room${nextRoomId++}`;
+}
+
+function releaseRoomId(roomId) {
+    const num = parseInt(roomId.replace("room", ""));
+    if (!isNaN(num)) {
+        freeRoomIds.push(num);
+//The main purpose of "(a, b) => a - b" is to sort the array numerically in ascending order.
+        freeRoomIds.sort((a, b) => a - b); // keep ascending order
+    }
+}
 
 function createGameState() {
     return {
         ball: { x: 400, y: 200, vx: 2, vy: 2, radius: 10 },
         player1: { x: 10, y: 150, width: 10, height: 100, score: 0 },
-        player2: { x: 780, y: 150, width: 10, height: 100, score: 0, targetY: 150 }
+        player2: { x: 780, y: 150, width: 10, height: 100, score: 0, targetY: 150},
+        gameEnded: false,
     };
 }
 
-function findAvailableRoom() {
+//entries is a method of Object that returns an array of [key, value] pairs for all properties in an object.
+function getLobbyInfo() {
+console.log(Object.entries(gameRooms))
+    return Object.entries(gameRooms).map(([id, room]) => ({
+        roomId: id,
+        players: room.players.length
+    }));
+}
+
+//Is not neccesary to delete the old gameRooms if any because assigning will overwrite it.
+//this fucntion is not used
+//function findAvailableRoom() {
+//    for (let roomId in gameRooms) {
+//        if (gameRooms[roomId].players.length < 2) return roomId;
+//    }
+//    const newRoomId =  createRoomId();
+//    gameRooms[newRoomId] = { 
+//        players: [], 
+//        gameState: createGameState(),
+//        startTime: Date.now()
+//    };
+//    return newRoomId;
+//}
+
+// Game loop
+setInterval(async () => {
     for (let roomId in gameRooms) {
-        if (gameRooms[roomId].players.length < 2 && !gameRooms[roomId].aiEnabled) {
-            return roomId;
+        const room = gameRooms[roomId];
+
+        if (room.players.length === 2 || room.aiEnabled === true) {		
+			if (room.aiEnabled) {
+                updateAIPaddle(room.gameState.player2, room.aiDifficulty);
+            }	
+            await updateGame(room.gameState, roomId);
+            io.to(roomId).emit('gameUpdate', room.gameState, roomId);
+        }
+
+        if (room.players.length === 0) {
+            delete gameRooms[roomId];
+            releaseRoomId(roomId);
+            io.emit("lobbyUpdate", getLobbyInfo());
         }
     }
-    const newRoomId = `room${nextRoomId++}`;
-    gameRooms[newRoomId] = {
-        players: [],
-        gameState: createGameState(),
-        aiEnabled: false,
-        ready: false,   // new flag
-        aiDifficulty: "medium"
-    };
-    return newRoomId;
-}
+}, 1000/60);
 
+// ---------------- AI Logic ----------------
 
 //AI Logic with Difficulty
 const DIFFICULTY_SETTINGS = {
@@ -137,7 +189,6 @@ const DIFFICULTY_SETTINGS = {
     hard:    { paddleSpeed: 8, errorRange: 5,  refreshRate: 500 }   // fast + precise
 };
 
-// ---------------- AI Logic ----------------
 function refreshAILogic(room) {
     const { errorRange } = DIFFICULTY_SETTINGS[room.aiDifficulty];
     const ball = room.gameState.ball;
@@ -164,31 +215,6 @@ function updateAIPaddle(paddle, difficulty) {
     }
 }
 
-// Game loop (60 FPS)
-setInterval(() => {
-    for (let roomId in gameRooms) {
-        const room = gameRooms[roomId];
-
-        // skip updating until game is ready
-        if (!room.ready) continue;
-
-        if (room.players.length > 0) {
-            // Run AI if enabled
-            if (room.aiEnabled) {
-                updateAIPaddle(room.gameState.player2, room.aiDifficulty);
-            }
-
-            updateGame(room.gameState);
-            io.to(roomId).emit('gameUpdate', room.gameState);
-        }
-
-        if (room.players.length === 0) {
-            delete gameRooms[roomId];
-            console.log(`🗑️ Cleaned up empty room: ${roomId}`);
-        }
-    }
-}, 1000/60);
-
 function startAIInterval(roomId) {
     const room = gameRooms[roomId];
     if (!room || !room.aiEnabled) return;
@@ -203,146 +229,286 @@ function startAIInterval(roomId) {
     }, refreshRate);
 }
 
-// ---------------- Socket.IO ----------------
-io.on('connection', function (socket) {
-    console.log('🎮 Player connected:', socket.id);
+// Protect socket with JWT
+io.use(async (socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) return next(new Error('Auth required'));
+    
+    try {
+        const decoded = await app.jwt.verify(token);
+        socket.user = decoded;
+        next();
+    } catch (error) {
+        next(new Error('Invalid token'));
+    }
+});
 
-    // Wait for the player to choose
-    socket.on("joinGame", ({ mode }) => {
-        let roomId;
+// Store online users
+app.decorate('onlineUsers', new Map()); // userId -> socketId
 
-        if (mode === "AI") {
-            // Always create a fresh room for AI games
-            roomId = `room${nextRoomId++}`;
-            gameRooms[roomId] = {
+// Socket.IO connection
+io.on("connection", (socket) => {
+    console.log("🎮 Player connected:", socket.user.username, socket.user.id);
+
+     const userId = socket.user.id; // assuming you decode token
+     app.onlineUsers.set(userId, socket.id);
+
+    // 👇 Join the user’s personal room (based on their ID)
+    socket.join(socket.user.id);
+
+    // Send current lobby info
+    socket.emit("lobbyUpdate", getLobbyInfo());
+
+    socket.on("joinRoom", (requestedRoomId, startGame, { mode }, challengeRoom) => {
+
+		if (challengeRoom) {
+			console.log(requestedRoomId);
+			gameRooms[requestedRoomId] = {
+				players: [],
+				gameState: createGameState(),
+				startTime: Date.now(),
+				aiEnabled: false,
+				aiDifficulty: "medium"
+				
+			}
+			const room = gameRooms[requestedRoomId];
+			socket.join(requestedRoomId);
+			room.players.push({ id: socket.id, isPlayer1: true, userId: challengeRoom.player1 });
+			socket.roomId = requestedRoomId;
+			room.players.push({ id: 0, isPlayer1: false, userId: challengeRoom.player2 });
+
+			socket.emit("gameUpdate", room.gameState);
+			socket.emit("playerAssignment", {
+				isPlayer1: false,
+				requestedRoomId,
+				playersInRoom: room.players.length,
+				message: `Room ${requestedRoomId} - You are Player "2"}`,
+				aiEnabled: room.aiEnabled
+			});
+
+			socket.emit("lobbyUpdate", getLobbyInfo());
+			return;
+		}
+		if (!startGame) {
+			socket.emit("chooseOpponent");
+			return ;
+		}
+		const checkRoom = gameRooms[requestedRoomId];
+		//here we can stop users from entering a room where AI mode is activated!
+		if (checkRoom && (checkRoom.players.length === 2 || checkRoom.aiEnabled === true)) {
+			const existingPlayer = checkRoom.players.find(p => p.userId === socket.user.id);
+			if (!existingPlayer) {
+				socket.emit("checkRoomStatus", {
+				roomId: requestedRoomId,
+				status: "roomFull",
+				message: `The ${requestedRoomId} is full!`,
+				isPlayer1: false,
+				aiEnabled: false
+				 })
+				console.log("checking RoomStatus: ->roomFull");
+				return ;
+			}
+		}
+		if (checkRoom) {
+			const existingPlayer = checkRoom.players.find(p => p.userId === socket.user.id);
+
+			if (existingPlayer) {
+				socket.join(requestedRoomId);
+				socket.roomId = requestedRoomId;
+				socket.isPlayer1 = existingPlayer.isPlayer1;
+				socket.emit("checkRoomStatus",  {
+					roomId: requestedRoomId,
+					status: "updateRoom",
+					message: `You are in the ${requestedRoomId}!`,
+					isPlayer1: existingPlayer.isPlayer1,
+					aiEnabled: checkRoom.aiEnabled
+				});
+				console.log("checking RoomStatus: ->updateRoom");
+				return ;
+			}
+		}
+		
+		let roomId = requestedRoomId || createRoomId();
+
+        // Create room if it doesn't exist
+		if (mode === "AI") {
+			gameRooms[roomId] = {
+				players: [],
+				gameState: createGameState(),
+				startTime: Date.now(),
+				aiEnabled: true,
+				aiDifficulty: "medium"
+				
+			}
+		}
+        if (!gameRooms[roomId]) {
+            gameRooms[roomId] = 
+            {
                 players: [],
                 gameState: createGameState(),
-                aiEnabled: true,
-                ready: false,
-                aiDifficulty: "medium" // default difficulty
+                startTime: Date.now(),
+				aiEnabled: false,
             };
-        } else {
-            // PvP mode → find or create a room with space
-            roomId = findAvailableRoom();
-            gameRooms[roomId].aiEnabled = false;
+            console.log(`🆕 Room created: ${roomId}`);
         }
 
-        const room = gameRooms[roomId];
-        socket.join(roomId);
+		const room = gameRooms[roomId];
 
-        const isPlayer1 = room.players.length === 0;
-        room.players.push({ id: socket.id, isPlayer1 });
+		// 👇 if not reconnecting → normal new player join logic
+        //this is handle in the emit("joinRoom") in the fron-end so it can safely be remove
+		//if (room.players.length >= 2) {
+		//	socket.emit("roomFull", { message: `Room ${roomId} is full.` });
+		//	return;
+		//}
 
-        socket.roomId = roomId;
-        socket.isPlayer1 = isPlayer1;
+		socket.join(roomId);
+		const isPlayer1 = room.players.length === 0;
+		room.players.push({ id: socket.id, isPlayer1, userId: socket.user.id });
+		socket.roomId = roomId;
+		socket.isPlayer1 = isPlayer1;
 
-        // Initial assignment
-        socket.emit("gameUpdate", room.gameState);
-        socket.emit("playerAssignment", {
-            isPlayer1,
-            roomId,
-            playersInRoom: room.players.length,
-            message: `Room ${roomId} - You are Player ${isPlayer1 ? "1 (left paddle)" : "2 (right paddle)"}`
-        });
+		socket.emit("gameUpdate", room.gameState);
+		socket.emit("playerAssignment", {
+			isPlayer1,
+			roomId,
+			playersInRoom: room.players.length,
+			message: `Room ${roomId} - You are Player ${isPlayer1 ? "1" : "2"}`,
+			aiEnabled: room.aiEnabled
+		});
 
-        if (room.aiEnabled) {
-            room.ready = true;
+		if (mode === "AI") {
             startAIInterval(roomId);
-            io.to(roomId).emit("gameReady", {
-                message: `Game ready in ${roomId}! You're playing against AI 🤖`
-            });
-        } else if (room.players.length === 2) {
-            room.ready = true; // PvP starts only when 2 players are present
-            io.to(roomId).emit("gameReady", {
-                message: `Game ready in ${roomId}! Both players connected 👥`
-            });
-        } else {
-            // Only one player in PvP → waiting screen
-            room.ready = false;
-            socket.emit("waitingForPlayer", {
+			io.to(roomId).emit("gameReady", { message: `Game ready in ${roomId}!` });
+		}
+		else if (room.players.length === 2) {
+			io.to(roomId).emit("gameReady", { message: `Game ready in ${roomId}!` });
+		}
+		else {
+			socket.emit("waitingForPlayer", {
                 message: `Waiting for an opponent to join room ${roomId}...`
             });
-        }
-    });
+		}
+		io.emit("lobbyUpdate", getLobbyInfo());
 
-    socket.on('setDifficulty', (data) => {
-        const room = gameRooms[socket.roomId];
+	});
+
+	socket.on('setDifficulty', (data, roomId) => {
+        const room = gameRooms[roomId];
         if (room && ["easy", "medium", "hard"].includes(data.level)) {
             room.aiDifficulty = data.level;
-            console.log(`🎚️ Difficulty for ${socket.roomId} set to ${data.level}`);
-            startAIInterval(socket.roomId); // restart with new refreshRate
+            console.log(`🎚️ Difficulty for ${roomId} set to ${data.level}`);
+            startAIInterval(roomId); // restart with new refreshRate
         }
     });
 
-    socket.on('paddleMove', function (data) {
+    // Paddle movement
+    socket.on("paddleMove", (data) => {
         const room = gameRooms[socket.roomId];
-        if (!room) return;
-
-        if (socket.isPlayer1) {
-            room.gameState.player1.y = Math.max(0, Math.min(300, data.y));
-        } else if (!room.aiEnabled) {
-            room.gameState.player2.y = Math.max(0, Math.min(300, data.y));
-        }
+        if (!room || room.gameState.gameEnded) return;
+        if (socket.isPlayer1) room.gameState.player1.y = Math.max(0, Math.min(300, data.y));
+        else room.gameState.player2.y = Math.max(0, Math.min(300, data.y));
     });
 
-    socket.on('disconnect', function () {
-        console.log('👋 Player disconnected:', socket.id);
-        const room = gameRooms[socket.roomId];
-        if (room) {
-            room.players = room.players.filter(p => p.id !== socket.id);
-            console.log(`📊 Room ${socket.roomId} now has ${room.players.length}/2 players`);
+    // Handle disconnect
+    socket.on("disconnect", () => {
+        //onlineUsers.delete(userId);
+		const roomId = socket.roomId;
+		if (!roomId || !gameRooms[roomId]) return;
 
-            if (room.players.length === 1) {
-                room.aiEnabled = true;
-                console.log(`🤖 AI re-enabled in ${socket.roomId}`);
-            }
+		const room = gameRooms[roomId];
+		const player = room.players.find(p => p.id === socket.id);
 
-            if (room.players.length > 0) {
-                io.to(socket.roomId).emit('playerDisconnected', {
-                    message: `Player ${socket.isPlayer1 ? '1' : '2'} disconnected. Waiting for new player...`
-                });
-            }
-        }
-    });
+		if (player) {
+			console.log(`⚠️ ${player.userId} disconnected from ${roomId}, waiting 10s...`);
+
+			// mark player as disconnected
+			player.disconnected = true;
+
+			// notify opponent
+			socket.to(roomId).emit("opponentDisconnected", {
+				message: "⚠️ Opponent disconnected. Waiting 10s for them to return..."
+			});
+
+			if (room.players.length === 0) {
+				delete gameRooms[roomId];
+				releaseRoomId(roomId);
+				console.log(`🗑️ Room ${roomId} deleted`);
+			} else {
+				io.to(roomId).emit("opponentLeft", { message: "Opponent left the game." });
+			}
+
+			io.emit("lobbyUpdate", getLobbyInfo());
+		}
+	});
+
+
 });
-// -------------------------------------------
-
-function updateGame(gameState) {
+// Game physics
+async function updateGame(gameState, roomId) {
+    // Don't update if game has ended
+    if (gameState.gameEnded) return;
+    
     gameState.ball.x += gameState.ball.vx;
     gameState.ball.y += gameState.ball.vy;
+    if (gameState.ball.y <= 0 || gameState.ball.y >= 400) gameState.ball.vy *= -1;
 
-    // Ball collision with top/bottom walls
-    if (gameState.ball.y <= 0 || gameState.ball.y >= 400) {
-        gameState.ball.vy = -gameState.ball.vy;
-    }
+    if (gameState.ball.x === 20 && gameState.ball.y >= gameState.player1.y && gameState.ball.y <= gameState.player1.y + 100)
+        gameState.ball.vx *= -1;
+    if (gameState.ball.x === 780 && gameState.ball.y >= gameState.player2.y && gameState.ball.y <= gameState.player2.y + 100)
+        gameState.ball.vx *= -1;
 
-    // Ball collision with player 1 paddle
-    if (
-        gameState.ball.x <= gameState.player1.x + gameState.player1.width &&
-        gameState.ball.x >= gameState.player1.x &&
-        gameState.ball.y >= gameState.player1.y &&
-        gameState.ball.y <= gameState.player1.y + gameState.player1.height
-    ) {
-        gameState.ball.vx = -gameState.ball.vx;
-    }
-
-    // Ball collision with player 2 paddle
-    if (
-        gameState.ball.x >= gameState.player2.x &&
-        gameState.ball.x <= gameState.player2.x + gameState.player2.width &&
-        gameState.ball.y >= gameState.player2.y &&
-        gameState.ball.y <= gameState.player2.y + gameState.player2.height
-    ) {
-        gameState.ball.vx = -gameState.ball.vx;
-    }
-
-    // Scoring
-    if (gameState.ball.x < 0) {
-        gameState.player2.score++;
+    let gameEnded = false;
+    if (gameState.ball.x < 0) { 
+        gameState.player2.score++; 
         resetBall(gameState);
-    } else if (gameState.ball.x > 800) {
-        gameState.player1.score++;
+        if (gameState.player2.score >= 5) gameEnded = true;
+    }
+    else if (gameState.ball.x > 800) { 
+        gameState.player1.score++; 
         resetBall(gameState);
+        if (gameState.player1.score >= 5) gameEnded = true;
+    }
+
+    // Save match when game ends
+    if (gameEnded && gameRooms[roomId]) {
+        gameState.gameEnded = true; // Mark game as ended to stop updates
+        const room = gameRooms[roomId];
+        if (room.players.length === 2) {
+            const player1 = room.players.find(p => p.isPlayer1);
+            const player2 = room.players.find(p => !p.isPlayer1);
+            
+            if (player1 && player2 && player1.userId && player2.userId) {
+                const winnerId = gameState.player1.score > gameState.player2.score ? player1.userId : player2.userId;
+                
+                // Notify players of game end
+                io.to(roomId).emit("gameEnded", {
+                    winner: winnerId === player1.userId ? "Player 1" : "Player 2",
+                    finalScore: `${gameState.player1.score} - ${gameState.player2.score}`
+                });
+                // Save match to database
+                await Match.create({
+                    player1Id: player1.userId,
+                    player2Id: player2.userId,
+                    player1Score: gameState.player1.score,
+                    player2Score: gameState.player2.score,
+                    winnerId: winnerId,
+                    duration: Math.floor((Date.now() - room.startTime) / 1000),
+                    gameType: '1v1'
+                });
+
+                // Update user stats
+                const winnerUser = await User.findByPk(winnerId);
+                const loserUser = await User.findByPk(winnerId === player1.userId ? player2.userId : player1.userId);
+                
+                await winnerUser.update({ wins: winnerUser.wins + 1 });
+                await loserUser.update({ losses: loserUser.losses + 1 });
+            }
+        }
+		io.to(roomId).emit("gameEnded", roomId);
+		delete gameRooms[roomId];
+		releaseRoomId(roomId);
+		console.log(`🗑️ Room ${roomId} deleted`);
+		io.emit("lobbyUpdate", getLobbyInfo());
     }
 }
 
@@ -352,7 +518,6 @@ function resetBall(gameState) {
     gameState.ball.vx = gameState.ball.vx > 0 ? -2 : 2;
     gameState.ball.vy = Math.random() > 0.5 ? 2 : -2;
 }
-
 
 // Start server
 const start = async () => {

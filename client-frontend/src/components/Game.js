@@ -6,9 +6,12 @@ const Game = () => {
   const canvasRef = useRef(null);
   const [gameState, setGameState] = useState(null);
   const [playerInfo, setPlayerInfo] = useState("Connecting...");
-  const [showModal, setShowModal] = useState(true);
+  const [showModal, setShowModal] = useState(false);
   const [showDifficulty, setShowDifficulty] = useState(false);
   const [scores, setScores] = useState({ p1: 0, p2: 0 });
+  const [lobbyRooms, setLobbyRooms] = useState([]);
+  const [roomId, setRoomId] = useState(null);
+  const [isPlayer1, setIsPlayer1] = useState(false);
 
   const easyRef = useRef();
   const mediumRef = useRef();
@@ -16,11 +19,42 @@ const Game = () => {
 
   // Handle socket events
   useEffect(() => {
+    // Check if user is authenticated before connecting
+    const token = localStorage.getItem('authToken');
+    console.log("🔍 Checking token:", token ? "Token exists" : "No token found");
+    
+    if (!token) {
+      setPlayerInfo("Please log in to play the game");
+      return;
+    }
+
+    // Update socket auth if token exists
+    socket.auth.token = token;
+    console.log("🔌 Attempting to connect to server...");
     socket.connect();
 
     socket.on("connect", () => {
       console.log("🌐 Connected to server:", socket.id);
+      setPlayerInfo("Connected! Choose game mode or join a room.");
     });
+
+    socket.on("connect_error", (error) => {
+      console.error("Connection failed:", error.message);
+      if (error.message === "Auth required" || error.message === "Invalid token") {
+        setPlayerInfo("Authentication failed. Please log in again.");
+        localStorage.removeItem('authToken');
+      } else {
+        setPlayerInfo("Connection failed. Please try again.");
+      }
+    });
+
+	socket.on("opponentReconnected", (msg) => {
+		setPlayerInfo(msg.message)
+	})
+
+	socket.on("opponentDisconnected", (msg) => {
+		setPlayerInfo(msg.message)
+	})
 
     socket.on("waitingForPlayer", (data) => {
       setPlayerInfo(data.message);
@@ -30,39 +64,108 @@ const Game = () => {
       setPlayerInfo(data.message);
     });
 
-    socket.on("gameReady", () => {
-      setPlayerInfo((prev) => prev + " - Game Ready!");
+    socket.on("gameReady", (data) => {
+      setPlayerInfo(data.message);
     });
 
     socket.on("playerDisconnected", (data) => {
       setPlayerInfo(data.message);
     });
 
-    socket.on("gameUpdate", (data) => {
-      setGameState(data);
-      setScores({ p1: data.player1.score, p2: data.player2.score });
+	socket.on('gameReset', (data) => {
+		setPlayerInfo(data.message);
+	})
+
+	socket.on("checkRoomStatus", (roomState) => {
+		alert(`${roomState.message}`)
+		if (roomState.status === "updateRoom") {
+			setRoomId(roomState.roomId);
+			setIsPlayer1(roomState.isPlayer1);
+			setPlayerInfo(`You are in the ${roomState.roomId}!`) // Use roomState.roomId instead of roomId
+			if (roomState.aiEnable === false) {
+				setShowDifficulty(false);
+			} else {
+				setShowDifficulty(true);
+			}
+		}
+
+	})
+
+    socket.on('playerAssigment', (data) => {
+        console.log("🎯 Player assignment received:", data);
+        setIsPlayer1(data.isPlayer1);
+        setRoomId(data.roomId)
+        setPlayerInfo(data.message)
+        if (data.aiEnable === true) {
+            setShowDifficulty(true);
+        } else {
+            setShowDifficulty(false);
+        }
     });
+
+    socket.on("gameUpdate", (data, roomToRender) => {	
+		// Use a callback to get current roomId value
+		setRoomId(currentRoomId => {
+			if (roomToRender === currentRoomId) {
+				setGameState(data);
+				setScores({ p1: data.player1.score, p2: data.player2.score });
+			}
+			return currentRoomId; // Return unchanged value
+		});
+    });
+
+	socket.on("lobbyUpdate", (room) => {
+		setLobbyRooms(room);
+	})
+
+	socket.on("chooseOpponent", () => { 
+		setShowModal(true);
+		}
+	)
+
+	socket.on("gameEnded", (rooomIdDeleted) => {
+		// Use a callback to get current roomId value
+		setRoomId(currentRoomId => {
+			if (currentRoomId === rooomIdDeleted) {
+				setGameState(null);
+				return null; // Set roomId to null
+			}
+			return currentRoomId; // Return unchanged value
+		});
+	})
 
     socket.on("disconnect", () => {
       setPlayerInfo("Disconnected");
     });
 
+
+
+
     // ✅ Clean up listeners on unmount
     return () => {
       socket.off("connect");
+      socket.off("connect_error");
       socket.off("waitingForPlayer");
       socket.off("playerAssignment");
       socket.off("gameReady");
       socket.off("playerDisconnected");
       socket.off("gameUpdate");
       socket.off("disconnect");
+      socket.off("lobbyUpdate");
+      socket.off("opponentReconnected");
+      socket.off("opponentDisconnected");
+      socket.off("gameReset");
+      socket.off("checkRoomStatus");
+      socket.off("playerAssigment");
+      socket.off("chooseOpponent");
+      socket.off("gameEnded");
       socket.disconnect();
     };
   }, []);
 
   // Draw game
   useEffect(() => {
-    if (!gameState) return;
+    if (!gameState || !roomId) {console.log("returning before rendering!!!"); return;}
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -104,12 +207,23 @@ const Game = () => {
       2 * Math.PI
     );
     ctx.fill();
-  }, [gameState]);
+
+	if (isPlayer1) {
+        ctx.strokeStyle = '#0f0';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(gameState.player1.x - 1, gameState.player1.y - 1, gameState.player1.width + 2, gameState.player1.height + 2);
+    } else {
+        ctx.strokeStyle = '#0f0';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(gameState.player2.x - 1, gameState.player2.y - 1, gameState.player2.width + 2, gameState.player2.height + 2);
+    }
+  }, [gameState, isPlayer1, roomId]);
 
   // Paddle control
   const handleMouseMove = (e) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+	if (!gameState || gameState.gameEnded) return;
     const rect = canvas.getBoundingClientRect();
     const mouseY = e.clientY - rect.top;
     socket.emit("paddleMove", { y: mouseY - 50 });
@@ -117,18 +231,20 @@ const Game = () => {
 
   // Modal buttons
   const handleChooseAI = () => {
+    console.log("🤖 Starting AI game...");
     setShowDifficulty(true);
     setShowModal(false);
-    socket.emit("joinGame", { mode: "AI" });
+    socket.emit("joinRoom", null, true, {mode: "AI"}, null);
   };
 
   const handleChoosePVP = () => {
+    console.log("👤 Starting PVP game...");
     setShowModal(false);
-    socket.emit("joinGame", { mode: "PVP" });
+    socket.emit("joinRoom", null, true, {mode: "PVP"}, null);
   };
 
   const setDifficulty = (level) => {
-    socket.emit("setDifficulty", { level });
+    socket.emit("setDifficulty", { level }, roomId);
     if (level === "easy") {
 		easyRef.current.style.backgroundColor = "yellow";
 		mediumRef.current.style.backgroundColor = "";
@@ -148,6 +264,17 @@ const Game = () => {
     console.log("Difficulty set:", level);
   };
 
+  // Lobby functions
+
+  const handleJoinRoom = (room) =>  {
+	socket.emit("joinRoom", room.roomId, true, {mode: "NOTHING"}, null);
+  }
+
+  const handleCreateRoom = () => {
+	socket.emit("joinRoom", null, false, {mode: "NOTHING"}, null);
+  }
+
+
   return (
     <div className="app-container">
       <h1 className="app-title">🏓 Simple Pong Game</h1>
@@ -158,6 +285,32 @@ const Game = () => {
           Player 1: {scores.p1} | Player 2: {scores.p2}
         </div>
       </div>
+
+      {/* Lobby Section */}
+      <div>
+		<h3>Available Rooms:</h3>
+		<div className="btn-lobbyRooms">
+			{ lobbyRooms.length === 0 ? (<p>No active Rooms yet, create one!</p>) :
+			  (<div className="btn-joinLobbyRoom">
+				{
+					lobbyRooms.map((room) => (
+						<button 
+							key={room.roomId}
+							onClick={() => handleJoinRoom(room)}
+						>
+							{room.roomId} ({room.players}/ 2)
+						</button>
+					))
+				}
+			  </div>)
+			}
+			<button className="btn-createRoom"
+					onClick={handleCreateRoom}
+			>
+				➕ Create New Room
+			</button>
+		</div>
+	  </div>
 
       {showDifficulty && (
         <div className="difficulty-controls">
